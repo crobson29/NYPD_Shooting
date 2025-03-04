@@ -7,7 +7,7 @@ output:
   pdf_document: default
 ---
 
-```{r setup}
+```{r setup, echo=FALSE, message=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(knitr)
 library(tidyverse)
@@ -31,12 +31,12 @@ shooting_data <- read_csv(url)
 
 By looking at a summary of the data, we can get insights into what the data looks like and what tidying steps need to happen.
 
-```{r summary_view}
+```{r summary_view, echo=FALSE}
 kable(summary(shooting_data), caption = "Summary of Shooting Data")
 ```
 Right away, I can tell a few things need to occur.  First, the column OCCUR_DATE is not a datetime object, so that will need to be converted.  We also do not need the Longitude and Latitude data, so we can drop those columns.  Lets also look at a few rows of data to see if there is anything missing and how we can deal with that.
 
-```{r head_view}
+```{r head_view, echo=FALSE}
 kable(head(shooting_data), caption = "First few rows of shooting_data")
 ```
 In several columns, there are missing values and null values.  Since "UNKNOWN" is already a value in the columns, we can probably replace the missing values with that since they are essentially unknown, at least to us.  There is enough to start tidying the data.
@@ -89,7 +89,7 @@ shootings_by_boro <- shooting_data_cleaned %>%
 ```
 
 Now that we have the data, we can create a visualization to see how the data looks.
-```{r shooting_by_boro_visual}
+```{r shooting_by_boro_visual, echo=FALSE}
 shootings_by_boro %>% 
   ggplot(aes(x = BORO, y = shootings, fill = STATISTICAL_MURDER_FLAG)) + 
   geom_col(position = "stack") + 
@@ -118,7 +118,7 @@ mod <- lm(shootings ~ year + BORO, data = yearly_shootings)
 summary(mod)
 ```
 Now we can plot our results to see the trends.
-```{r plot_lm}
+```{r plot_lm, echo=FALSE}
 yearly_shootings %>% 
   ggplot(aes(x = year, y = shootings, color = BORO)) +
   geom_point() +
@@ -136,7 +136,7 @@ shooting_data_cleaned <- shooting_data_cleaned %>%
 
 Now we can build the visualization.  I am using a density plot so we can see how the rate of shootings changes throughout the day on a more granular level compared to a histogram.  The plot will go from the 0th hour of the day(midnight) to the 23rd hour of the day.
 
-```{r shooting_time_density_plot}
+```{r shooting_time_density_plot, echo=FALSE}
 shooting_data_cleaned %>% 
   ggplot(aes(x = Hour)) + 
   geom_density(fill = "blue", alpha = .5) +
