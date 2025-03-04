@@ -1,0 +1,154 @@
+---
+title: "NYPD Shooting"
+author: "Charlie Robson"
+date: "2025-02-12"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+library(skimr)
+```
+
+# NYPD Shooting Data Analysis
+
+In this document, I will be analyzing a data set describing the NYPD Shooting data from 2006 to the end of last year, which is 2024 at the time of writing.  I will be going through the steps I am taking one by one, starting with importing the data, cleaning and tidying the data, and analyzing the data.
+
+### Importing and Tidying Data
+
+To start, I will bring in the data from data.gov.
+```{r data_import, message=FALSE}
+# This url is found at catalog.data.gov
+url <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+shooting_data <- read_csv(url)
+```
+
+By looking at a summary of the data, we can get insights into what the data looks like and what tidying steps need to happen.
+
+```{r summary_view}
+kable(summary(shooting_data), caption = "Summary of Shooting Data")
+```
+Right away, I can tell a few things need to occur.  First, the column OCCUR_DATE is not a datetime object, so that will need to be converted.  We also do not need the Longitude and Latitude data, so we can drop those columns.  Lets also look at a few rows of data to see if there is anything missing and how we can deal with that.
+
+```{r head_view}
+kable(head(shooting_data), caption = "First few rows of shooting_data")
+```
+In several columns, there are missing values and null values.  Since "UNKNOWN" is already a value in the columns, we can probably replace the missing values with that since they are essentially unknown, at least to us.  There is enough to start tidying the data.
+
+First, we will convert the date to the proper format.  Then, we can convert the non-datetime and non-logical columns to characters.  We can then combine the date and time columns into one.  After combining these columns, we don't need them separately, so we can drop them along with the location columns.  Then we can finish by filling in the missing and null values with Unknown.
+
+```{r tidying_data}
+shooting_data_cleaned <- shooting_data %>%
+  mutate(OCCUR_DATE = mdy(OCCUR_DATE)) %>% # Convert to Date first
+
+  mutate(across(where(
+    ~ !inherits(., "Date") &
+      !inherits(., "hms") &
+      !inherits(., "logical")
+  ), as.character)) %>% # Convert all except date/time columns to characters
+
+  mutate(OCCUR_DATETIME = as.POSIXct(
+    paste(OCCUR_DATE, OCCUR_TIME),
+    format = "%Y-%m-%d %H:%M:%S",
+    tz = "EST"
+  )) %>% # Combine the date and time columns
+
+  select(-c(
+    X_COORD_CD,
+    Y_COORD_CD,
+    Latitude,
+    Longitude,
+    Lon_Lat,
+    OCCUR_DATE,
+    OCCUR_TIME
+  )) %>% # We can also drop the separate date and time columns since they are combined
+
+  mutate(across(
+    where(is.character),
+    ~ replace(., is.na(.) |
+      . == "(null)", "UNKNOWN")
+  )) # Replace the missing values with Unknown
+  
+```
+
+### Analyzing and Visualizing Data
+
+Now that the data has been cleaned, we can start our analysis.  First, we will compare shootings across the different boroughs.  We are also interested in the murder rates, so we will group the data by borough and whether or not it is flagged as a murder.
+```{r shooting_by_boro}
+shootings_by_boro <- shooting_data_cleaned %>%
+  group_by(BORO, STATISTICAL_MURDER_FLAG) %>% # Group by borough and murder flag
+  summarize(shootings = n(), .groups = "drop") %>%  # summarize so we have a count of the number of shootings.  The result is counts of shootings for each borough, and either murder or not
+  group_by(BORO) %>% 
+  mutate(percentage_murder = shootings / sum(shootings) *100)
+```
+
+Now that we have the data, we can create a visualization to see how the data looks.
+```{r shooting_by_boro_visual}
+shootings_by_boro %>% 
+  ggplot(aes(x = BORO, y = shootings, fill = STATISTICAL_MURDER_FLAG)) + 
+  geom_col(position = "stack") + 
+  geom_text(aes(label = paste0(round(percentage_murder, 1), "%")),
+            position = position_stack(vjust = .5),
+            color = "black") +
+  labs(title = "Shootings by Borough", x="Borough", y="Number of Shootings", fill="Murder") + 
+  theme_minimal()
+```
+
+From this visual, we can tell that Brooklyn has the most shootings, though Staten Island has a higher rate of shootings classified as murder.  An interesting next step for this visual could be to normalize the data for population, but we do not have that data available to us.
+
+While this visual gives us a good overhead view of the data, we can go deeper by looking at the change over time.  By using a simple linear regression model, we can see the trends over time in each borough.
+
+First, we need to aggregate the data for yearly shootings by borough.
+```{r yearly_shooting_aggregation}
+yearly_shootings <- shooting_data_cleaned %>% 
+  mutate(year = year(OCCUR_DATETIME)) %>% #extract the year
+  group_by(year, BORO) %>% 
+  summarize(shootings = n(), .groups = "drop") #group the number of shootings by year and borough
+```
+
+Next, we need to fit a linear regression model.
+```{r fit_lm_model}
+mod <- lm(shootings ~ year + BORO, data = yearly_shootings)
+summary(mod)
+```
+Now we can plot our results to see the trends.
+```{r plot_lm}
+yearly_shootings %>% 
+  ggplot(aes(x = year, y = shootings, color = BORO)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title="Trend of Shootings by Borough", x = "Year", y = "Number of Shootings")
+```
+
+This gives us much more information about the data.  As we can see, while Brooklyn still has the highest number of shootings, it has been trending down YOY, so it might not in the future.  Interestingly, all of the data has been trending down, indicating that the total number of shootings is trending down as well.
+
+Another interesting view could be a look at the time of day that the shootings occurred.  To start, we will extract the hour from the datetime column.
+```{r separate_hour}
+shooting_data_cleaned <- shooting_data_cleaned %>% 
+  mutate(Hour = hour(OCCUR_DATETIME)) #Separate the hour from the datetime to use in analysis
+```
+
+Now we can build the visualization.  I am using a density plot so we can see how the rate of shootings changes throughout the day on a more granular level compared to a histogram.  The plot will go from the 0th hour of the day(midnight) to the 23rd hour of the day.
+
+```{r shooting_time_density_plot}
+shooting_data_cleaned %>% 
+  ggplot(aes(x = Hour)) + 
+  geom_density(fill = "blue", alpha = .5) +
+  scale_x_continuous(breaks = seq(0,23, by=1)) + 
+  labs(title="Density of Shootings by Hour",
+       x = "Hour of Day",
+       y = "Density") + 
+  theme_minimal()
+```
+
+We can see from the density plot, the rate is highest early in the morning and very late at night.
+
+### Conclusion
+From this data, we found answers for several questions.  First, we found which borough has the most shootings and which has the higher likelihood of a shooting being classed as a murder.  Second, we found the most dangerous times with regards to shootings.  These are the questions that I chose to look into, but there are other questions that could be asked.  I chose these questions because I believe they are less likely to be taken out of context later to support something that is not within the scope of this project.  This is definitely a source of bias.  In a larger project with more comprehensive data, there are insights that could be found about age or race, but I thought it would be irresponsible to approach these subjects while knowing that I cannot have the full picture.
+
